@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route } from 'react-router-dom';
 import { StoreProvider } from './context/StoreContext';
 import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
@@ -9,7 +9,7 @@ import { Sales } from './pages/Sales';
 function App() {
   return (
     <StoreProvider>
-      <BrowserRouter basename="/pdv-moderno">
+      <HashRouter>
         <Layout>
           <Routes>
             <Route path="/" element={<Dashboard />} />
@@ -18,7 +18,7 @@ function App() {
             <Route path="/vendas" element={<Sales />} />
           </Routes>
         </Layout>
-      </BrowserRouter>
+      </HashRouter>
     </StoreProvider>
   );
 }
