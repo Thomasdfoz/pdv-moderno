@@ -1,61 +1,165 @@
 import { createContext, useContext, useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 
 const StoreContext = createContext();
 
-// Initial sample data
-const SAMPLE_PRODUCTS = [
-    { id: 1, name: 'Coca-Cola 2L', price: 8.50, cost: 5.00, stock: 50, category: 'Bebidas', barcode: '7894900011111' },
-    { id: 2, name: 'Pão Francês', price: 0.50, cost: 0.30, stock: 100, category: 'Padaria', barcode: '7894900022222' },
-    { id: 3, name: 'Leite Integral 1L', price: 5.20, cost: 3.80, stock: 30, category: 'Laticínios', barcode: '7894900033333' },
-    { id: 4, name: 'Arroz 5kg', price: 28.90, cost: 22.00, stock: 20, category: 'Grãos', barcode: '7894900044444' },
-    { id: 5, name: 'Feijão Preto 1kg', price: 8.90, cost: 6.50, stock: 25, category: 'Grãos', barcode: '7894900055555' },
-];
-
 export function StoreProvider({ children }) {
-    // Load from localStorage or use sample data
-    const [products, setProducts] = useState(() => {
-        const saved = localStorage.getItem('pdv_products');
-        return saved ? JSON.parse(saved) : SAMPLE_PRODUCTS;
-    });
-
-    const [sales, setSales] = useState(() => {
-        const saved = localStorage.getItem('pdv_sales');
-        return saved ? JSON.parse(saved) : [];
-    });
-
+    const [products, setProducts] = useState([]);
+    const [sales, setSales] = useState([]);
     const [cart, setCart] = useState([]);
+    const [loading, setLoading] = useState(true);
 
-    // Persist to localStorage
+    // Load products from Supabase on mount
     useEffect(() => {
-        localStorage.setItem('pdv_products', JSON.stringify(products));
-    }, [products]);
+        loadProducts();
+        loadSales();
+    }, []);
 
-    useEffect(() => {
-        localStorage.setItem('pdv_sales', JSON.stringify(sales));
-    }, [sales]);
+    const loadProducts = async () => {
+        try {
+            setLoading(true);
+            const { data, error } = await supabase
+                .from('produtos')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+
+            // Map Supabase fields to our format
+            const mappedProducts = data.map(p => ({
+                id: p.id,
+                name: p.nome,
+                price: parseFloat(p.preco),
+                cost: parseFloat(p.custo || 0),
+                stock: p.estoque,
+                category: p.categoria,
+                barcode: p.barcode
+            }));
+
+            setProducts(mappedProducts);
+        } catch (error) {
+            console.error('Error loading products:', error.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const loadSales = async () => {
+        try {
+            const { data, error } = await supabase
+                .from('vendas')
+                .select(`
+          *,
+          itens_venda (*)
+        `)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+
+            const mappedSales = data.map(s => ({
+                id: s.id,
+                date: s.created_at,
+                total: parseFloat(s.total),
+                paymentMethod: s.forma_pagamento,
+                items: s.itens_venda.map(item => ({
+                    id: item.produto_id,
+                    name: item.produto_nome,
+                    quantity: item.quantidade,
+                    price: parseFloat(item.preco_unitario)
+                }))
+            }));
+
+            setSales(mappedSales);
+        } catch (error) {
+            console.error('Error loading sales:', error.message);
+        }
+    };
 
     // Product Management
-    const addProduct = (product) => {
-        const newProduct = {
-            ...product,
-            id: Date.now(),
-        };
-        setProducts([...products, newProduct]);
+    const addProduct = async (product) => {
+        try {
+            const { data, error } = await supabase
+                .from('produtos')
+                .insert([{
+                    nome: product.name,
+                    barcode: product.barcode,
+                    categoria: product.category,
+                    preco: product.price,
+                    custo: product.cost,
+                    estoque: product.stock
+                }])
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            // Add to local state
+            const newProduct = {
+                id: data.id,
+                name: data.nome,
+                price: parseFloat(data.preco),
+                cost: parseFloat(data.custo || 0),
+                stock: data.estoque,
+                category: data.categoria,
+                barcode: data.barcode
+            };
+
+            setProducts([newProduct, ...products]);
+            return newProduct;
+        } catch (error) {
+            console.error('Error adding product:', error.message);
+            throw error;
+        }
     };
 
-    const updateProduct = (id, updates) => {
-        setProducts(products.map(p => p.id === id ? { ...p, ...updates } : p));
+    const updateProduct = async (id, updates) => {
+        try {
+            const updateData = {};
+            if (updates.name !== undefined) updateData.nome = updates.name;
+            if (updates.price !== undefined) updateData.preco = updates.price;
+            if (updates.cost !== undefined) updateData.custo = updates.cost;
+            if (updates.stock !== undefined) updateData.estoque = updates.stock;
+            if (updates.category !== undefined) updateData.categoria = updates.category;
+            if (updates.barcode !== undefined) updateData.barcode = updates.barcode;
+
+            const { error } = await supabase
+                .from('produtos')
+                .update(updateData)
+                .eq('id', id);
+
+            if (error) throw error;
+
+            // Update local state
+            setProducts(products.map(p =>
+                p.id === id ? { ...p, ...updates } : p
+            ));
+        } catch (error) {
+            console.error('Error updating product:', error.message);
+            throw error;
+        }
     };
 
-    const deleteProduct = (id) => {
-        setProducts(products.filter(p => p.id !== id));
+    const deleteProduct = async (id) => {
+        try {
+            const { error } = await supabase
+                .from('produtos')
+                .delete()
+                .eq('id', id);
+
+            if (error) throw error;
+
+            setProducts(products.filter(p => p.id !== id));
+        } catch (error) {
+            console.error('Error deleting product:', error.message);
+            throw error;
+        }
     };
 
     const adjustStock = (id, quantity) => {
         updateProduct(id, { stock: quantity });
     };
 
-    // Cart Management
+    // Cart Management (local only - no need to save to DB)
     const addToCart = (product, quantity = 1) => {
         const existingItem = cart.find(item => item.id === product.id);
 
@@ -93,33 +197,75 @@ export function StoreProvider({ children }) {
     };
 
     // Sales Management
-    const completeSale = (paymentMethod) => {
-        const sale = {
-            id: Date.now(),
-            date: new Date().toISOString(),
-            items: cart,
-            total: getCartTotal(),
-            paymentMethod,
-        };
+    const completeSale = async (paymentMethod) => {
+        try {
+            const total = getCartTotal();
 
-        // Update stock
-        cart.forEach(item => {
-            const product = products.find(p => p.id === item.id);
-            if (product) {
-                updateProduct(item.id, { stock: product.stock - item.quantity });
+            // Insert sale
+            const { data: saleData, error: saleError } = await supabase
+                .from('vendas')
+                .insert([{
+                    total: total,
+                    forma_pagamento: paymentMethod
+                }])
+                .select()
+                .single();
+
+            if (saleError) throw saleError;
+
+            // Insert sale items
+            const items = cart.map(item => ({
+                venda_id: saleData.id,
+                produto_id: item.id,
+                produto_nome: item.name,
+                quantidade: item.quantity,
+                preco_unitario: item.price,
+                subtotal: item.price * item.quantity
+            }));
+
+            const { error: itemsError } = await supabase
+                .from('itens_venda')
+                .insert(items);
+
+            if (itemsError) throw itemsError;
+
+            // Update stock for each product
+            for (const item of cart) {
+                const product = products.find(p => p.id === item.id);
+                if (product) {
+                    await updateProduct(item.id, { stock: product.stock - item.quantity });
+                }
             }
-        });
 
-        setSales([sale, ...sales]);
-        clearCart();
+            // Add to local sales state
+            const newSale = {
+                id: saleData.id,
+                date: saleData.created_at,
+                total: parseFloat(saleData.total),
+                paymentMethod: saleData.forma_pagamento,
+                items: cart.map(item => ({
+                    id: item.id,
+                    name: item.name,
+                    quantity: item.quantity,
+                    price: item.price
+                }))
+            };
 
-        return sale;
+            setSales([newSale, ...sales]);
+            clearCart();
+
+            return newSale;
+        } catch (error) {
+            console.error('Error completing sale:', error.message);
+            throw error;
+        }
     };
 
     const value = {
         products,
         sales,
         cart,
+        loading,
         addProduct,
         updateProduct,
         deleteProduct,
@@ -130,6 +276,8 @@ export function StoreProvider({ children }) {
         clearCart,
         getCartTotal,
         completeSale,
+        loadProducts,
+        loadSales,
     };
 
     return (
