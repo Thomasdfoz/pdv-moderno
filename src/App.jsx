@@ -9,7 +9,7 @@ import { Sales } from './pages/Sales';
 function App() {
   return (
     <StoreProvider>
-      <BrowserRouter>
+      <BrowserRouter basename="/pdv-moderno">
         <Layout>
           <Routes>
             <Route path="/" element={<Dashboard />} />
